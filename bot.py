@@ -151,21 +151,26 @@ async def search_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         user_code = update.message.text.strip()
         logger.info(f"Searching product for code: {user_code}")
         
+        if user_code.lower() in ("/start", "start"):
+            welcome_text = (
+                "مرحباً بك في بوت البحث عن المنتجات! 👋\n\n"
+                "يرجى إرسال كود المنتج أو الباركود للاستعلام عن تفاصيله وسعره الجديد."
+            )
+            await update.message.reply_text(welcome_text)
+            return
+            
+        if not user_code.isdigit():
+            await update.message.reply_text("⚠️ يرجى إدخال كود أو باركود صحيح (أرقام فقط).")
+            return
+            
         logger.info("Searching by code...")
         if user_code in products_cache:
             logger.info("Product found by code.")
             p = products_cache[user_code]
             reply_text = (
-                f"📦 {p['اسم']}\n\n"
-                f"🏭 الشركة: {p['الشركة']}\n"
-                f"📂 النوع: {p['النوع']}\n"
-                f"📏 المقاس: {p['المقاس']}\n\n"
-                f"💰 سعر البيع: {p['سعر البيع']}\n"
-                f"💵 سعر الشراء: {p['سعر الشراء']}\n\n"
-                f"📊 الكمية: {p['الكمية']}\n"
-                f"🏬 المخزن: {p['اسم المخزن']}\n\n"
-                f"🔢 الكود: {p['الكود']}\n"
-                f"📱 الباركود: {p['الباركود']}"
+                f"📦 الاسم : {p['اسم']}\n\n"
+                f"🏭 الشركة: {p['الشركة']}\n\n"
+                f"💰 السعر الجديد: {p['السعر الجديد']}"
             )
             await update.message.reply_text(reply_text)
             logger.info(f"Product found: {user_code}")
@@ -175,7 +180,7 @@ async def search_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 logger.info("Product found by barcode.")
                 p = barcodes_cache[user_code]
                 reply_text = (
-                    f"📦 {p['اسم']}\n\n"
+                    f"📦 الاسم : {p['اسم']}\n\n"
                     f"🏭 الشركة: {p['الشركة']}\n\n"
                     f"💰 السعر الجديد: {p['السعر الجديد']}"
                 )
