@@ -168,9 +168,9 @@ async def search_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             logger.info("Product found by code.")
             p = products_cache[user_code]
             reply_text = (
-                f"📦 الاسم : {p['اسم']}\n\n"
+                f"📦 اسم الصنف: {p['اسم']}\n\n"
                 f"🏭 الشركة: {p['الشركة']}\n\n"
-                f"💰 السعر الجديد: {p['السعر الجديد']}"
+                f"💰 السعر: {p['السعر الجديد']}"
             )
             await update.message.reply_text(reply_text)
             logger.info(f"Product found: {user_code}")
@@ -180,9 +180,9 @@ async def search_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 logger.info("Product found by barcode.")
                 p = barcodes_cache[user_code]
                 reply_text = (
-                    f"📦 الاسم : {p['اسم']}\n\n"
+                    f"📦 اسم الصنف: {p['اسم']}\n\n"
                     f"🏭 الشركة: {p['الشركة']}\n\n"
-                    f"💰 السعر الجديد: {p['السعر الجديد']}"
+                    f"💰 السعر: {p['السعر الجديد']}"
                 )
                 await update.message.reply_text(reply_text)
                 logger.info(f"Product found: {user_code}")
