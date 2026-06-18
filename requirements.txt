@@ -1,2 +1,2 @@
-gspread
 python-telegram-bot
+requests

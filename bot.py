@@ -3,11 +3,9 @@ import logging
 import threading
 import time
 import math
-import json
 import csv
-import urllib.request
-import io
-import gspread
+import requests
+from io import StringIO
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
@@ -84,54 +82,13 @@ def load_products(is_refresh: bool = False) -> None:
     global products_cache, barcodes_cache
     logger.info("Google Sheet loading...")
     try:
-        records = None
+        url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        response.encoding = 'utf-8'
         
-        # 1. Try to authorize and retrieve sheet using gspread if credentials exist
-        has_creds = False
-        creds_file = None
-        if os.path.exists("service_account.json"):
-            creds_file = "service_account.json"
-            has_creds = True
-        elif os.path.exists("credentials.json"):
-            creds_file = "credentials.json"
-            has_creds = True
-        elif os.getenv("GSPREAD_CREDENTIALS"):
-            has_creds = True
-            
-        if has_creds:
-            try:
-                logger.info("Attempting to load data using gspread...")
-                if creds_file:
-                    gc = gspread.service_account(filename=creds_file)
-                else:
-                    gspread_creds = os.getenv("GSPREAD_CREDENTIALS")
-                    creds_dict = json.loads(gspread_creds)
-                    gc = gspread.service_account_from_dict(creds_dict)
-                    
-                sh = gc.open_by_key(SHEET_ID)
-                # Use first worksheet
-                worksheet = sh.get_worksheet(0)
-                records = worksheet.get_all_records()
-                logger.info("Successfully fetched data using gspread.")
-            except Exception as e:
-                logger.warning(f"gspread execution failed: {e}. Falling back to direct HTTP CSV retrieval.")
-                
-        # 2. Fallback: Retrieve the CSV directly via HTTP request if gspread is not configured or failed
-        if records is None:
-            logger.info("Loading data directly via HTTP CSV export URL...")
-            url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
-            req = urllib.request.Request(
-                url, 
-                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-            )
-            with urllib.request.urlopen(req) as response:
-                csv_data = response.read().decode('utf-8')
-            
-            f = io.StringIO(csv_data)
-            reader = csv.DictReader(f)
-            records = list(reader)
-            logger.info("Successfully fetched data via HTTP CSV export.")
-            
+        records = list(csv.DictReader(StringIO(response.text)))
+        
         # Standardize headers in each record (e.g. rename "الاسم" or "اسم الصنف" to "اسم")
         if records:
             for record in records:
