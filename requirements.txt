@@ -1,2 +1,2 @@
-pandas
+gspread
 python-telegram-bot

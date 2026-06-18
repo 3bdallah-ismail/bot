@@ -2,7 +2,12 @@ import os
 import logging
 import threading
 import time
-import pandas as pd
+import math
+import json
+import csv
+import urllib.request
+import io
+import gspread
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
@@ -48,9 +53,17 @@ REQUIRED_COLUMNS = [
 products_cache = {}
 barcodes_cache = {}
 
+def is_na(val) -> bool:
+    """Helper to check if a value is missing (None or NaN)."""
+    if val is None:
+        return True
+    if isinstance(val, float) and math.isnan(val):
+        return True
+    return False
+
 def clean_code(val) -> str:
     """Helper to convert product code into clean string representation."""
-    if pd.isna(val):
+    if is_na(val):
         return ""
     if isinstance(val, float):
         if val.is_integer():
@@ -60,7 +73,7 @@ def clean_code(val) -> str:
 
 def format_val(val) -> str:
     """Helper to format Excel field values nicely for display."""
-    if pd.isna(val):
+    if is_na(val):
         return ""
     if isinstance(val, float) and val.is_integer():
         return str(int(val))
@@ -71,41 +84,91 @@ def load_products(is_refresh: bool = False) -> None:
     global products_cache, barcodes_cache
     logger.info("Google Sheet loading...")
     try:
-        url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
-        df = pd.read_csv(url)
+        records = None
         
-        # Rename "الاسم" or "اسم الصنف" to "اسم" if they exist in the Google Sheet columns
-        if "الاسم" in df.columns and "اسم" not in df.columns:
-            df = df.rename(columns={"الاسم": "اسم"})
-        if "اسم الصنف" in df.columns and "اسم" not in df.columns:
-            df = df.rename(columns={"اسم الصنف": "اسم"})
+        # 1. Try to authorize and retrieve sheet using gspread if credentials exist
+        has_creds = False
+        creds_file = None
+        if os.path.exists("service_account.json"):
+            creds_file = "service_account.json"
+            has_creds = True
+        elif os.path.exists("credentials.json"):
+            creds_file = "credentials.json"
+            has_creds = True
+        elif os.getenv("GSPREAD_CREDENTIALS"):
+            has_creds = True
+            
+        if has_creds:
+            try:
+                logger.info("Attempting to load data using gspread...")
+                if creds_file:
+                    gc = gspread.service_account(filename=creds_file)
+                else:
+                    gspread_creds = os.getenv("GSPREAD_CREDENTIALS")
+                    creds_dict = json.loads(gspread_creds)
+                    gc = gspread.service_account_from_dict(creds_dict)
+                    
+                sh = gc.open_by_key(SHEET_ID)
+                # Use first worksheet
+                worksheet = sh.get_worksheet(0)
+                records = worksheet.get_all_records()
+                logger.info("Successfully fetched data using gspread.")
+            except Exception as e:
+                logger.warning(f"gspread execution failed: {e}. Falling back to direct HTTP CSV retrieval.")
+                
+        # 2. Fallback: Retrieve the CSV directly via HTTP request if gspread is not configured or failed
+        if records is None:
+            logger.info("Loading data directly via HTTP CSV export URL...")
+            url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+            req = urllib.request.Request(
+                url, 
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            )
+            with urllib.request.urlopen(req) as response:
+                csv_data = response.read().decode('utf-8')
+            
+            f = io.StringIO(csv_data)
+            reader = csv.DictReader(f)
+            records = list(reader)
+            logger.info("Successfully fetched data via HTTP CSV export.")
+            
+        # Standardize headers in each record (e.g. rename "الاسم" or "اسم الصنف" to "اسم")
+        if records:
+            for record in records:
+                if "الاسم" in record and "اسم" not in record:
+                    record["اسم"] = record.pop("الاسم")
+                if "اسم الصنف" in record and "اسم" not in record:
+                    record["اسم"] = record.pop("اسم الصنف")
+            headers = list(records[0].keys())
+        else:
+            headers = []
             
         # Validate required columns
-        missing_cols = [col for col in REQUIRED_COLUMNS if col not in df.columns]
+        missing_cols = [col for col in REQUIRED_COLUMNS if col not in headers]
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
             
         # Cache all products in memory
         new_cache = {}
         new_barcode_cache = {}
-        for idx, row in df.iterrows():
-            raw_code = row["الكود"]
+        for row in records:
+            raw_code = row.get("الكود")
             code = clean_code(raw_code)
             if not code:
                 continue
                 
             product_info = {}
             for col in REQUIRED_COLUMNS:
-                product_info[col] = format_val(row[col])
+                product_info[col] = format_val(row.get(col))
                 
-            if "السعر الجديد" in df.columns:
+            if "السعر الجديد" in row:
                 product_info["السعر الجديد"] = format_val(row["السعر الجديد"])
             else:
                 product_info["السعر الجديد"] = product_info.get("سعر البيع", "")
                 
             new_cache[code] = product_info
             
-            raw_barcode = row["الباركود"]
+            raw_barcode = row.get("الباركود")
             barcode = clean_code(raw_barcode)
             if barcode:
                 new_barcode_cache[barcode] = product_info
